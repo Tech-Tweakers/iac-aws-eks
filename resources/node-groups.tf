@@ -68,7 +68,7 @@ resource "aws_iam_role_policy_attachment" "node_AmazonEC2ContainerRegistryReadOn
 resource "aws_security_group" "eks_nodes" {
   name        = "${var.project}-node-sg"
   description = "Security group for all nodes in the cluster"
-  vpc_id      = "vpc-000bbc20645fbf497"
+  vpc_id      = var.vpc-id
 
   egress {
     from_port   = 0

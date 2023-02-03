@@ -21,3 +21,8 @@ output "cluster-security-group-id" {
 output "cluster-iam-role-arn" {
   value = aws_iam_role.cluster.arn
 }
+
+output "cluster-iam-role-name" {
+  value = aws_iam_role.cluster.name
+}
+

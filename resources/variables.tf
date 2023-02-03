@@ -47,3 +47,13 @@ variable "tags" {
     default = {}
     description = "Tags to apply to resources"
 }
+
+variable "route-table-id" {
+    type = string
+    description = "value of route-table-id"
+}
+
+variable "vpc-id" {
+    type = string
+    description = "value of vpc-id"
+}
