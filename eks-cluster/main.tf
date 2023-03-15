@@ -24,6 +24,14 @@ data "aws_eks_cluster_auth" "this" {
 
 data "aws_availability_zones" "available" {}
 
+terraform {
+  backend "s3" {
+    bucket = "terraform-s3-states"
+    key = "eks-cluster"
+    region = "us-east-1"
+  }
+}
+
 locals {
   name   = "poc-cluster-01"
   region = "us-east-1"
@@ -50,7 +58,7 @@ module "eks" {
 
   cluster_name                   = local.name
   cluster_version                = local.cluster_version
-  cluster_endpoint_public_access = false
+  cluster_endpoint_public_access = true
 
   # EKS Addons
   cluster_addons = {
@@ -64,11 +72,11 @@ module "eks" {
 
   eks_managed_node_groups = {
     initial = {
-      instance_types = ["t3.small"]
+      instance_types = ["t3.micro"]
 
-      min_size     = 2
-      max_size     = 5
-      desired_size = 3
+      min_size     = 1
+      max_size     = 4
+      desired_size = 2
     }
   }
 
@@ -108,6 +116,7 @@ module "eks_blueprints_kubernetes_addons" {
   }
 
   argocd_manage_add_ons = true # Indicates that ArgoCD is responsible for managing/deploying add-ons
+
   argocd_applications = {
     addons = {
       path               = "chart"
@@ -182,23 +191,23 @@ module "vpc" {
   private_subnets = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 4, k)]
   public_subnets  = [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 8, k + 48)]
 
-  enable_nat_gateway   = false
-  single_nat_gateway   = false
-  enable_dns_hostnames = false
+  enable_nat_gateway   = true
+  single_nat_gateway   = true
+  enable_dns_hostnames = true
 
   # Manage so we can name
-  manage_default_network_acl    = false
+  manage_default_network_acl    = true
   default_network_acl_tags      = { Name = "${local.name}-default" }
-  manage_default_route_table    = false
+  manage_default_route_table    = true
   default_route_table_tags      = { Name = "${local.name}-default" }
-  manage_default_security_group = false
+  manage_default_security_group = true
   default_security_group_tags   = { Name = "${local.name}-default" }
 
   public_subnet_tags = {
     "kubernetes.io/role/elb" = 1
   }
 
-  private_subnet_tags = {
+  private_subnet_tags = { 
     "kubernetes.io/role/internal-elb" = 1
   }
 
