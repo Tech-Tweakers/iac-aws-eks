@@ -29,6 +29,7 @@ terraform {
     bucket = "terraform-s3-states"
     key = "eks-cluster/terraform.tfstate"
     region = "us-east-1"
+    profile = "default"
   }
 }
 
