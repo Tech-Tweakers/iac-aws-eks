@@ -1,91 +1,134 @@
-name: "Terraform"
+name: Plan / Apply On Merge
 
 on:
   push:
     branches:
       - main
-  pull_request:
 
 jobs:
-  terraform:
-    name: "Terraform"
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      id-token: write
-      contents: read
+  inform_about_apply:
+    name: Inform About Apply
+    runs-on: ubuntu-20.04
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Inform on PR that Apply is Running
+        uses: mshick/add-pr-comment@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          repo-token-user-login: 'github-actions[bot]'
+          message: |
+            ***Running terraform apply***
+            Results will display here momentarily...            
+
+  plan_and_apply:
+    name: Plan and Apply
+    env:
+      TF_VAR_allowed_account_id: ${{ secrets.ALLOWED_ACCOUNT_ID }}
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        path:
+          - dev
+          - stage
+          - prod
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v1
         with:
-          # terraform_version: 0.13.0:
-          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+          terraform_version: 1.0.9
 
-      - name: Setup Terraform Backend
-        id: backend
-        run: |
-          cat > backend.tf << EOF
-          terraform {
-            backend "s3" {
-                bucket = "terraform-s3-states"
-                key = "eks-cluster/terraform.tfstate"
-                region = "us-east-1"
-                profile = "default"
-              }
-            }
-          }
-          EOF
-
-      - name: Terraform Init
-        id: init
-        run: env && cd eks-cluster/ && terraform init
-      
-      - name: Terraform Validate
-        id: validate
-        run: cd eks-cluster/ &&  terraform validate -no-color
-
-      - name: Terraform Plan
-        id: plan
-        run: cd eks-cluster/ &&  terraform plan -no-color -input=false
-        continue-on-error: true
-
-      - name: Update Pull Request
-        uses: actions/github-script@v6
-        if: github.event_name == 'pull_request'
-        env:
-          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
-            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
-            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
-            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+          aws-region: us-east-1
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
-            <details><summary>Show Plan</summary>
+      - name: Initialize Terraform
+        run: |
+          cd terraform/${{ matrix.path }}
+          terraform init -input=false          
 
-            \`\`\`\n
-            ${process.env.PLAN}
-            \`\`\`
+      - name: Plan Terraform
+        id: plan
+        continue-on-error: true
+        run: |
+          cd terraform/${{ matrix.path }}
+          terraform plan -input=false -no-color -out=tfplan \
+          && terraform show -no-color tfplan          
 
-            </details>
+      # Sed is taking all lines that begin with one or more spaces followed by a `+` or `-`.
+      # It stores the amount of spaces in `\1` and the +/- in `\2`.
+      # Then replace that portion of the line with `\2\1` (+/- followed by the number of matched spaces).
+      - name: Reformat Plan
+        if: steps.plan.outcome == 'success'
+        run: |
+          echo '${{ steps.plan.outputs.stdout || steps.plan.outputs.stderr }}' \
+          | sed -E 's/^([[:space:]]+)([-+])/\2\1/g' > plan.txt          
 
-            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+      - name: Put Plan in Env Var
+        if: steps.plan.outcome == 'success'
+        run: |
+          PLAN=$(cat plan.txt)
+          echo "PLAN<<EOF" >> $GITHUB_ENV
+          echo "$PLAN" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV          
 
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: output
-            })
+      - name: Apply Terraform
+        if: steps.plan.outcome == 'success'
+        id: apply
+        continue-on-error: true
+        run: |
+          cd terraform/${{ matrix.path }}
+          terraform apply \
+            -input=false \
+            -no-color \
+            tfplan          
 
-      - name: Terraform Plan Status
+      - name: Post Plan and Apply to GitHub PR
+        if: steps.plan.outcome == 'success' && steps.apply.outcome == 'success'
+        uses: mshick/add-pr-comment@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          repo-token-user-login: 'github-actions[bot]'
+          message: |
+            Applying **${{ matrix.path }}**:
+
+            ```diff
+            ${{ env.PLAN }}
+            ```
+
+            ```
+            ${{ steps.apply.outputs.stdout }}
+            ```            
+
+      - name: Post Plan Failure
         if: steps.plan.outcome == 'failure'
-        run: exit 1
+        uses: mshick/add-pr-comment@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          repo-token-user-login: 'github-actions[bot]'
+          message: |
+            Plan failed for **${{ matrix.path }}**:
 
-      - name: Terraform Apply
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: cd eks-cluster/ && terraform apply -auto-approve -input=false
+            ```
+            ${{ steps.plan.outputs.stderr }}
+            ```            
+
+      - name: Post Apply Failure
+        if: steps.apply.outcome == 'failure'
+        uses: mshick/add-pr-comment@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          repo-token-user-login: 'github-actions[bot]'
+          message: |
+            Apply failed for **${{ matrix.path }}**:
+
+            ```
+            ${{ steps.apply.outputs.stderr }}
+            ```            
