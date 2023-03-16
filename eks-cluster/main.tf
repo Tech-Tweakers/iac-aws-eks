@@ -27,7 +27,7 @@ data "aws_availability_zones" "available" {}
 terraform {
   backend "s3" {
     bucket = "terraform-s3-states"
-    key = "eks-cluster"
+    key = "eks-cluster/terraform.tfstate"
     region = "us-east-1"
   }
 }
