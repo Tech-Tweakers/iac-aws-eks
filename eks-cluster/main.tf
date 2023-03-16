@@ -24,13 +24,13 @@ data "aws_eks_cluster_auth" "this" {
 
 data "aws_availability_zones" "available" {}
 
-terraform {
+/* terraform {
   backend "s3" {
     bucket = "terraform-s3-states"
     key = "eks-cluster"
     region = "us-east-1"
   }
-}
+} */
 
 locals {
   name   = "poc-cluster-01"
