@@ -159,7 +159,7 @@ resource "bcrypt_hash" "argo" {
 
 #tfsec:ignore:aws-ssm-secret-use-customer-key
 resource "aws_secretsmanager_secret" "argocd" {
-  name                    = "argocd"
+  name                    = "argocd-01"
   recovery_window_in_days = 0 # Set to zero for this example to force delete during Terraform destroy
 }
 
