@@ -26,7 +26,7 @@ jobs:
 
       - name: Terraform Format
         id: fmt
-        run: terraform fmt -check
+        run: cd eks-cluster/ && terraform fmt -check
 
       - name: Terraform Init
         id: init
@@ -34,12 +34,12 @@ jobs:
       
       - name: Terraform Validate
         id: validate
-        run: terraform validate -no-color
+        run: cd eks-cluster/ &&  terraform validate -no-color
 
       - name: Terraform Plan
         id: plan
         if: github.event_name == 'pull_request'
-        run: terraform plan -no-color -input=false
+        run: cd eks-cluster/ &&  terraform plan -no-color -input=false
         continue-on-error: true
 
       - name: Update Pull Request
@@ -78,4 +78,4 @@ jobs:
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: terraform apply -auto-approve -input=false
+        run: cd eks-cluster/ && terraform apply -auto-approve -input=false
