@@ -26,7 +26,7 @@ jobs:
 
       - name: Terraform Format
         id: fmt
-        run: cd eks-cluster/ && terraform fmt -check
+        run: cd eks-cluster/ && pwd && terraform fmt -check
 
       - name: Terraform Init
         id: init
