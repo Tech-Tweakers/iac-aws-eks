@@ -9,6 +9,6 @@ resource "aws_kms_key" "this" {
 
 # Assign an alias to the key
 resource "aws_kms_alias" "this" {
-  name          = "alias/kms-cluster-03"
+  alias          = "alias/kms-cluster-03"
   target_key_id = aws_kms_key.this.key_id
 }
