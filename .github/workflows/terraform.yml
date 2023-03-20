@@ -15,7 +15,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
-          aws-region: eu-west-1
+          aws-region: us-east-1
 
       - name: Check out code
         uses: actions/checkout@v2
@@ -50,7 +50,7 @@ jobs:
         run: terraform init
         working-directory: ${{ env.working-directory }}
         env:
-          TF_CLI_ARGS_init: "-backend-config=role_arn=arn:aws:iam::99999999:role/my-github-actions-role -upgrade -reconfigure"
+          TF_CLI_ARGS_init: "-upgrade -reconfigure"
           TF_VAR_assume_role: "my-github-actions-role"
 
       - name: Terraform validate
@@ -61,8 +61,6 @@ jobs:
         id: plan
         run: terraform plan -no-color
         working-directory: ${{ env.working-directory }}
-        env:
-          TF_VAR_assume_role: "my-github-actions-role"
 
       - name: Plan output
         id: output
@@ -103,22 +101,12 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: terraform apply -auto-approve -input=false
         working-directory: ${{ env.working-directory }}
-        env:
-          TF_VAR_assume_role: "my-github-actions-role"
 
       - name: Install InSpec
         uses: actionshub/chef-install@main
         with:
           channel: current
-          project: inspec
-
-      - name: Assume Role
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-region: eu-west-1
-          role-to-assume: arn:aws:iam::88888888888888:role/my-github-actions-role
-          role-duration-seconds: 600
-          role-skip-session-tagging: true          
+          project: inspec      
 
       - name: Infrastructure Tests
         id: inspec
