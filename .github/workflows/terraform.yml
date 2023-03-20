@@ -1,149 +1,120 @@
----
-name: "GitHub Actions Example"
+name: Plan / Apply On Merge
 
-"on":
-  pull_request:
-  push: { branches: [main] }
+on:
+  push:
+    branches:
+      - main
 
-jobs:
-  terraform:
-    runs-on: ubuntu-latest
-    env:
-      working-directory: eks-cluster
+jobs:          
+  plan_and_apply:
+    name: Plan and Apply
+    runs-on: ubuntu-20.04
+
     steps:
-      - name: Configure AWS credentials
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: 1.0.9
+
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
           aws-region: us-east-1
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
-      - name: Check out code
-        uses: actions/checkout@v2
-        
-      - name: Run Terrascan
-        id: terrascan
-        uses: accurics/terrascan-action@main
-        with:
-          iac_type: 'terraform'
-          iac_version: 'v14'
-          policy_type: 'aws'
-          only_warn: true
-          iac_dir: infrastructure
-        #sarif_upload: true
-        #non_recursive:
-        #iac_dir:
-        #policy_path:
-        #skip_rules:
-        #config_path:
+      - name: Initialize Terraform
+        run: |
+          cd eks-cluster/
+          terraform init -input=false          
 
-      - uses: hashicorp/setup-terraform@v1
-        with:
-          terraform_version: 0.14.4
-
-      - name: Terraform Fmt
-        id: fmt
-        run: terraform fmt -check
-        continue-on-error: true
-
-      - name: Terraform init
-        id: init
-        run: terraform init
-        working-directory: ${{ env.working-directory }}
-        env:
-          TF_CLI_ARGS_init: "-upgrade -reconfigure"
-          TF_VAR_assume_role: "my-github-actions-role"
-
-      - name: Terraform validate
-        id: validate
-        run: terraform validate
-
-      - name: Terraform plan
+      - name: Plan Terraform
         id: plan
-        run: terraform plan -no-color
-        working-directory: ${{ env.working-directory }}
+        continue-on-error: true
+        run: |
+          cd eks-cluster/
+          terraform plan -input=false -no-color -out=tfplan \
+          && terraform show -no-color tfplan       
 
-      - name: Plan output
-        id: output
-        uses: actions/github-script@v3
-        if: github.event_name == 'pull_request'
-        env:
-          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
-            ### 
-
-            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
-            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
-            <details><summary>Show Plan</summary>
-
-            \`\`\`hcl
-            ${process.env.PLAN}
-            \`\`\`
-
-            </details>
-
-            **Pusher**: @${{ github.actor }}
-            **Action**: ${{ github.event_name }}
-            `;
-            github.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: output
-            })
-
-      - name: Terraform apply
+      - name: Apply Terraform
+        if: steps.plan.outcome == 'success'
         id: apply
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: terraform apply -auto-approve -input=false
-        working-directory: ${{ env.working-directory }}
+        continue-on-error: true
+        run: |
+          cd eks-cluster/
+          terraform apply \
+            -input=false \
+            -no-color \
+            tfplan          
 
-      - name: Install InSpec
-        uses: actionshub/chef-install@main
+      - name: Post Plan and Apply to GitHub PR
+        if: steps.plan.outcome == 'success' && steps.apply.outcome == 'success'
+        uses: mshick/add-pr-comment@v1
         with:
-          channel: current
-          project: inspec      
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          repo-token-user-login: 'github-actions[bot]'
+          message: |
+            Applying:
 
-      - name: Infrastructure Tests
-        id: inspec
-        run: inspec exec profile/example --reporter=cli:- progress:inspec.log --input-file=profile/example/attributes-example.yml -t aws://
-        env:
-          CHEF_LICENSE: accept
+            ```diff
+            ${{ env.PLAN }}
+            ```
 
-      - name: Infrastructure Test Results 
-        id: inspec_results
-        if: always()
-        run: | 
-          REPORT="$(cat inspec.log)"
-          REPORT="${REPORT//'%'/'%25'}"
-          REPORT="${REPORT//$'\n'/'%0A'}"
-          REPORT="${REPORT//$'\r'/'%0D'}"
-          echo "::set-output name=loginspec::$REPORT"
+            ```
+            ${{ steps.apply.outputs.stdout }}
+            ```            
 
-      - name: Infrastructure tests Output
-        if: always()      
-        uses: actions/github-script@v3
-        env:
-          INSPEC: "Inspec Test Results \n${{ steps.inspec_results.outputs.loginspec }}"
+      - name: Post Plan Failure
+        if: steps.plan.outcome == 'failure'
+        uses: mshick/add-pr-comment@v1
         with:
-          github-token: ${{secrets.GITHUB_TOKEN}}
-          script: |
-            const output = `#### Inspec Tests 🖌\`${{ steps.inspec.outcome }}\`
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          repo-token-user-login: 'github-actions[bot]'
+          message: |
+            Plan failed:
 
-            <details><summary>Show Test Results</summary>
+            ```
+            ${{ steps.plan.outputs.stderr }}
+            ```            
 
-            \`\`\`
+      - name: Post Apply Failure
+        if: steps.apply.outcome == 'failure'
+        uses: mshick/add-pr-comment@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          repo-token-user-login: 'github-actions[bot]'
+          message: |
+            Apply failed:
 
-            ${process.env.INSPEC}
-            \`\`\`
-           
-            </details>
+            ```
+            ${{ steps.apply.outputs.stderr }}
+            ```
+  # terraform_destroy:
+  #     name: "Terraform_destroy"
+  #     runs-on: ubuntu-latest
+  #     steps:
+  #       - name: Checkout
+  #         uses: actions/checkout@v2
 
-            `;
-            github.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: output
-            })
+  #       - name: Setup Terraform
+  #         uses: hashicorp/setup-terraform@v1
+
+  #       - name: Terraform Init
+  #         id: init
+  #         run: terraform init
+  #         env:
+  #             AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  #             AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  #             AWS_DEFAULT_REGION: ${{ secrets.REGION }}
+        
+  #       - name: Terraform Destroy
+  #         id: destroy
+  #         working-directory: ${{ github.event.inputs.resource }}
+  #         run: terraform destroy -auto-approve
+  #         env:
+  #             AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  #             AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  #             AWS_DEFAULT_REGION: "us-east-1"
