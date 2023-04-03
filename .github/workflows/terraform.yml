@@ -43,8 +43,9 @@ jobs:
       run: cd eks-cluster/ && terraform plan -input=false
 
     - name: Terraform Apply
-      run: terraform apply -auto-approve
+      if: github.event_name == 'push'
+      run: cd eks-cluster/ && terraform apply -auto-approve
 
     - name: Terraform Destroy
       if: github.event_name == 'pull_request'
-      run: terraform destroy -auto-approve
+      run: cd eks-cluster/ && terraform destroy -auto-approve
